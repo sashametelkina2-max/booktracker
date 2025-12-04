@@ -8,9 +8,10 @@ enum BookState {
   Abandoned, // заброшена
 }
 
-enum Page { Home, BookCreate, BookEdit }
+enum Page { Home, BookCreate, BookEdit, CurrentPageEdit, SetupDayGoal }
 
 class Book {
+  int id = 0;
   String title;
   String author;
   int pages;
@@ -23,7 +24,9 @@ class Book {
     required this.pages,
     this.currentPage = 0,
     this.state = BookState.New,
-  });
+  }) {
+    id = DateTime.now().millisecondsSinceEpoch;
+  }
 
   int getPercentage() {
     if (currentPage == 0) return 0;
@@ -77,10 +80,35 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   Page page = Page.Home;
+  int? currentBookIndex; // nullable, null safety
   List<Book> books = [
     Book(title: "asdf", author: "asdf", pages: 1234, currentPage: 500),
     Book(title: "slsfdkjg", author: "s;dflkj", pages: 5),
   ];
+
+  void addBook(Book book, {redirect = true}) {
+    setState(() {
+      books.add(book);
+      if (redirect) {
+        page = Page.Home;
+      }
+    });
+  }
+
+  void saveBook(int bookIndex, Book book, {redirect = true}) {
+    setState(() {
+      books[bookIndex] = book;
+      if (redirect) {
+        page = Page.Home;
+      }
+    });
+  }
+
+  void goHome() {
+    setState(() {
+      page = Page.Home;
+    });
+  }
 
   void createBook() {
     setState(() {
@@ -88,14 +116,179 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  void editBook(int bookIndex) {
+    setState(() {
+      page = Page.BookEdit;
+      currentBookIndex = bookIndex;
+    });
+  }
+
+  void setCurrentBookPage(int bookId) {
+    setState(() {
+      page = Page.CurrentPageEdit;
+      currentBookIndex = bookId;
+    });
+  }
+
+  void setDayGoal() {
+    setState(() {
+      page = Page.SetupDayGoal;
+    });
+  }
+
+  Widget home() {
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          BooksGroup(
+            books:
+                books.where((book) => book.state == BookState.Reading).toList(),
+            title: "Читаю",
+            elementInfo: true,
+            setPageCallback: (book) => setCurrentBookPage(book.id),
+          ),
+          BooksGroup(
+            books: books.where((book) => book.state == BookState.New).toList(),
+            title: "В процессе чтения",
+            elementInfo: true,
+            setPageCallback: (book) => setCurrentBookPage(book.id),
+          ),
+          BooksGroup(
+            books:
+                books
+                    .where((book) => book.state == BookState.Abandoned)
+                    .toList(),
+            title: "Заброшенные",
+            elementInfo: true,
+            setPageCallback: (book) => setCurrentBookPage(book.id),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget bookEdit(Book book) {
+    return Placeholder();
+  }
+
+  Widget currentPageEdit(Book book) {
+    return Column(
+      children: [
+        TextButton(
+          onPressed: goHome,
+          child: Row(children: [Icon(Icons.arrow_back), Text("Назад")]),
+        ),
+        inputField(
+          label: "Количество прочитанных страниц",
+          defaultValue: book.currentPage.toString(),
+          onChange: (value) => book.currentPage = int.parse(value),
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () => saveBook(currentBookIndex!, book),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                // Set the background color here
+                foregroundColor:
+                    Colors.white, // Set the text color here (optional)
+              ),
+              child: Text("Сохранить"),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget bookCreate() {
+    String title = "";
+    String author = "";
+    String pagesCount = "";
+
+    void create() {
+      Book book = Book(
+        title: title,
+        author: author,
+        pages: int.parse(pagesCount),
+      );
+      addBook(book);
+    }
+
+    return Column(
+      children: [
+        TextButton(
+          onPressed: goHome,
+          child: Row(children: [Icon(Icons.arrow_back), Text("Назад")]),
+        ),
+        inputField(
+          label: "Название книги",
+          placeholder: "Введите название книги",
+          onChange: (value) => title = value,
+        ),
+        inputField(
+          label: "Автор",
+          placeholder: "Введите автора",
+          onChange: (value) => author = value,
+        ),
+        inputField(
+          label: "Количество страниц",
+          placeholder: "Введите количество страниц",
+          onChange: (value) => pagesCount = value,
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: create,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                // Set the background color here
+                foregroundColor:
+                    Colors.white, // Set the text color here (optional)
+              ),
+              child: Text("Создать"),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget setupDayGoal() {
+    return Placeholder();
+  }
+
+  Widget getCurrentPage() {
+    if (page == Page.Home) {
+      return home();
+    } else if (page == Page.BookEdit) {
+      return bookEdit(books[currentBookIndex!]);
+    } else if (page == Page.CurrentPageEdit) {
+      return currentPageEdit(books.firstWhere((book) => book.id == currentBookIndex));
+    } else if (page == Page.BookCreate) {
+      return bookCreate();
+    } else if (page == Page.SetupDayGoal) {
+      return setupDayGoal();
+    }
+
+    throw Exception();
+  }
+
+  Widget? getActionButton() {
+    if (page == Page.Home) {
+      return FloatingActionButton(
+        onPressed: createBook,
+        tooltip: 'Create book',
+        child: const Icon(Icons.add),
+      );
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
         // TRY THIS: Try changing the color here to a specific color (to
@@ -106,29 +299,47 @@ class _MyHomePageState extends State<MyHomePage> {
         // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
       ),
-      body: Padding(
-        padding: EdgeInsets.all(10),
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              BooksGroup(books: books, title: "Читаю", elementInfo: true),
-              BooksGroup(
-                books: books,
-                title: "В процессе чтения",
-                elementInfo: true,
-              ),
-              BooksGroup(books: books, title: "Заброшенные", elementInfo: true),
-            ],
-          ),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: createBook,
-        tooltip: 'Create book',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+      body: Padding(padding: EdgeInsets.all(10), child: getCurrentPage()),
+      floatingActionButton: getActionButton(),
     );
   }
+}
+
+Widget inputField({
+  required String label,
+  required void Function(String) onChange,
+  String? defaultValue,
+  String placeholder = "",
+}) {
+  return Padding(
+    padding: EdgeInsets.symmetric(vertical: 10.0),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.fromLTRB(0, 0, 0, 5),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: Colors.black,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        TextFormField(
+          onChanged: onChange,
+          initialValue: defaultValue,
+          decoration: InputDecoration(
+            hintText: placeholder,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(15)),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class BooksGroup extends StatelessWidget {
@@ -136,28 +347,54 @@ class BooksGroup extends StatelessWidget {
     super.key,
     required this.books,
     required this.title,
+    required this.setPageCallback,
     this.elementInfo = false,
   });
 
   final bool elementInfo;
   final String title;
   final List<Book> books;
+  final void Function(Book) setPageCallback;
 
   @override
   Widget build(BuildContext context) {
-    List<BookView> bookList = [];
+    List<Widget> bookList = [];
     for (var book in books) {
-      bookList.add(BookView(book: book, viewInfo: elementInfo));
+      bookList.add(
+        BookView(
+          book: book,
+          viewInfo: elementInfo,
+          setPageCallback: setPageCallback,
+        ),
+      );
     }
+    if (books.isEmpty) {
+      bookList.add(
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [Text("Пока нет книг в этом разделе")],
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: EdgeInsets.all(10),
-          child: Text(
-            title,
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Padding(
+                padding: EdgeInsets.all(10),
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
         Wrap(children: bookList),
       ],
@@ -166,10 +403,16 @@ class BooksGroup extends StatelessWidget {
 }
 
 class BookView extends StatelessWidget {
-  const BookView({super.key, required this.book, this.viewInfo = false});
+  const BookView({
+    super.key,
+    required this.book,
+    this.viewInfo = false,
+    required this.setPageCallback,
+  });
 
   final bool viewInfo;
   final Book book;
+  final void Function(Book) setPageCallback;
 
   void changeStatus() {
     // do smth
@@ -213,6 +456,20 @@ class BookView extends StatelessWidget {
               Text(
                 book.author,
                 style: TextStyle(color: Colors.grey, fontSize: 13),
+              ),
+              Row(
+                children: [
+                  Text("Текущая страница"),
+                  TextButton(
+                    onPressed: () => setPageCallback(book),
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit),
+                        Text(book.currentPage.toString()),
+                      ],
+                    ),
+                  ),
+                ],
               ),
               progress(),
             ],
