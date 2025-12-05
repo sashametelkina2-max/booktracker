@@ -10,6 +10,11 @@ enum BookState {
 
 enum Page { Home, BookCreate, BookEdit, CurrentPageEdit, SetupDayGoal }
 
+int getValuePercentage(int value, int all) {
+  if (value == 0) return 0;
+  return (min(value, all) / all * 100.0).round();
+}
+
 class Book {
   int id = 0;
   String title;
@@ -17,6 +22,9 @@ class Book {
   int pages;
   int currentPage;
   BookState state;
+
+  int? rate;
+  String notes = "";
 
   Book({
     required this.title,
@@ -29,8 +37,7 @@ class Book {
   }
 
   int getPercentage() {
-    if (currentPage == 0) return 0;
-    return (min(currentPage, pages) / pages * 100.0).round();
+    return getValuePercentage(currentPage, pages);
   }
 }
 
@@ -41,30 +48,14 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Book tracker',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const MyHomePage(title: 'Book tracker'),
     );
   }
 }
@@ -85,8 +76,10 @@ class _MyHomePageState extends State<MyHomePage> {
     Book(title: "asdf", author: "asdf", pages: 1234, currentPage: 500),
     Book(title: "slsfdkjg", author: "s;dflkj", pages: 5),
   ];
+  int dayPagesGoal = 10;
+  int currentDayPages = 5;
 
-  void addBook(Book book, {redirect = true}) {
+  void addBook(Book book, {bool redirect = true}) {
     setState(() {
       books.add(book);
       if (redirect) {
@@ -95,12 +88,23 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  void saveBook(int bookIndex, Book book, {redirect = true}) {
+  void saveBook(Book book, {bool redirect = true}) {
     setState(() {
-      books[bookIndex] = book;
+      int index = books.indexWhere((b) => b.id == book.id);
+      if (index == -1) return;
+      books[index] = book;
       if (redirect) {
         page = Page.Home;
       }
+    });
+  }
+
+  void deleteBook(Book book) {
+    setState(() {
+      int index = books.indexWhere((b) => b.id == book.id);
+      if (index == -1) return;
+      books.removeAt(index);
+      page = Page.Home;
     });
   }
 
@@ -116,10 +120,10 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  void editBook(int bookIndex) {
+  void editBook(int bookId) {
     setState(() {
       page = Page.BookEdit;
-      currentBookIndex = bookIndex;
+      currentBookIndex = bookId;
     });
   }
 
@@ -136,22 +140,70 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  Widget dayGoalButton() {
+    int percent = getValuePercentage(currentDayPages, dayPagesGoal);
+    return ElevatedButton(
+      onPressed: setDayGoal,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.blueAccent,
+        // Set the background color here
+        foregroundColor: Colors.white, // Set the text color here (optional)
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Padding(
+            padding: EdgeInsets.only(right: 5),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    color: Colors.white,
+                    backgroundColor: Colors.blue,
+                    value: percent * 0.01,
+                  ),
+                ),
+                Text("$percent%"),
+              ],
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.all(20.0),
+            child: Column(
+              children: [
+                Text("Цель чтения на сегодня"),
+                Text("Прочитано $currentDayPages/$dayPagesGoal страниц"),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget home() {
     return SingleChildScrollView(
       child: Column(
         children: [
+          dayGoalButton(),
           BooksGroup(
             books:
                 books.where((book) => book.state == BookState.Reading).toList(),
             title: "Читаю",
             elementInfo: true,
             setPageCallback: (book) => setCurrentBookPage(book.id),
+            editCallback: (book) => editBook(book.id),
           ),
           BooksGroup(
             books: books.where((book) => book.state == BookState.New).toList(),
             title: "В процессе чтения",
             elementInfo: true,
             setPageCallback: (book) => setCurrentBookPage(book.id),
+            editCallback: (book) => editBook(book.id),
           ),
           BooksGroup(
             books:
@@ -161,6 +213,7 @@ class _MyHomePageState extends State<MyHomePage> {
             title: "Заброшенные",
             elementInfo: true,
             setPageCallback: (book) => setCurrentBookPage(book.id),
+            editCallback: (book) => editBook(book.id),
           ),
         ],
       ),
@@ -168,10 +221,82 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Widget bookEdit(Book book) {
-    return Placeholder();
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextButton(
+                onPressed: goHome,
+                child: Row(children: [Icon(Icons.arrow_back), Text("Назад")]),
+              ),
+            ),
+            TextButton(
+              onPressed: () => deleteBook(book),
+              child: Row(children: [Icon(Icons.delete)]),
+            ),
+          ],
+        ),
+        inputField(
+          defaultValue: book.title,
+          label: "Название книги",
+          placeholder: "Введите название книги",
+          onChange: (value) => book.title = value,
+        ),
+        inputField(
+          defaultValue: book.author,
+          label: "Автор",
+          placeholder: "Введите автора",
+          onChange: (value) => book.author = value,
+        ),
+        inputField(
+          defaultValue: book.pages.toString(),
+          label: "Количество страниц",
+          placeholder: "Введите количество страниц",
+          onChange: (value) => book.pages = int.parse(value),
+        ),
+        inputField(
+          defaultValue: book.notes.toString(),
+          label: "Заметки",
+          placeholder: "Вы можете здесь написать впечатления от книги",
+          onChange: (value) => book.notes = value,
+        ),
+        SizedBox(height: 10),
+        InputRate(
+          rate: book.rate,
+          label: "Оцените книгу",
+          onChange: (value) => book.rate = value,
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () => saveBook(book),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                // Set the background color here
+                foregroundColor:
+                    Colors.white, // Set the text color here (optional)
+              ),
+              child: Text("Сохранить"),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   Widget currentPageEdit(Book book) {
+    int previousPages = book.currentPage;
+
+    void update() {
+      saveBook(book);
+      int delta = book.currentPage - previousPages;
+      setState(() {
+        currentDayPages += delta;
+      });
+    }
+
     return Column(
       children: [
         TextButton(
@@ -187,7 +312,7 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             ElevatedButton(
-              onPressed: () => saveBook(currentBookIndex!, book),
+              onPressed: update,
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blueAccent,
                 // Set the background color here
@@ -257,16 +382,46 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Widget setupDayGoal() {
-    return Placeholder();
+    return Column(
+      children: [
+        TextButton(
+          onPressed: goHome,
+          child: Row(children: [Icon(Icons.arrow_back), Text("Назад")]),
+        ),
+        inputField(
+          defaultValue: dayPagesGoal.toString(),
+          label: "Цель чтения на день",
+          placeholder: "Введите количество страниц",
+          onChange: (value) => dayPagesGoal = int.parse(value),
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () => setState(() => page = Page.Home),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                // Set the background color here
+                foregroundColor:
+                    Colors.white, // Set the text color here (optional)
+              ),
+              child: Text("Сохранить"),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   Widget getCurrentPage() {
     if (page == Page.Home) {
       return home();
     } else if (page == Page.BookEdit) {
-      return bookEdit(books[currentBookIndex!]);
+      return bookEdit(books.firstWhere((book) => book.id == currentBookIndex));
     } else if (page == Page.CurrentPageEdit) {
-      return currentPageEdit(books.firstWhere((book) => book.id == currentBookIndex));
+      return currentPageEdit(
+        books.firstWhere((book) => book.id == currentBookIndex),
+      );
     } else if (page == Page.BookCreate) {
       return bookCreate();
     } else if (page == Page.SetupDayGoal) {
@@ -301,6 +456,72 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
       body: Padding(padding: EdgeInsets.all(10), child: getCurrentPage()),
       floatingActionButton: getActionButton(),
+    );
+  }
+}
+
+class InputRate extends StatefulWidget {
+  const InputRate({
+    super.key,
+    required this.label,
+    required this.onChange,
+    this.rate = 0,
+  });
+
+  final String label;
+  final int? rate;
+  final void Function(int) onChange;
+
+  @override
+  State<InputRate> createState() => _InputRateState();
+}
+
+class _InputRateState extends State<InputRate> {
+  int? value;
+
+  void update(int value) {
+    setState(() {
+      this.value = value;
+    });
+  }
+
+  Widget star(int index) {
+    return GestureDetector(
+      onTap: () => update(index),
+      child: Padding(
+        padding: EdgeInsets.all(5),
+        child: Icon(
+          Icons.star,
+          color:
+              (value ?? widget.rate ?? 0) >= index
+                  ? Colors.orangeAccent
+                  : Colors.grey,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 10.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(0, 0, 0, 5),
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          Row(children: [star(0), star(1), star(2), star(3), star(4)]),
+        ],
+      ),
     );
   }
 }
@@ -348,6 +569,7 @@ class BooksGroup extends StatelessWidget {
     required this.books,
     required this.title,
     required this.setPageCallback,
+    required this.editCallback,
     this.elementInfo = false,
   });
 
@@ -355,6 +577,7 @@ class BooksGroup extends StatelessWidget {
   final String title;
   final List<Book> books;
   final void Function(Book) setPageCallback;
+  final void Function(Book) editCallback;
 
   @override
   Widget build(BuildContext context) {
@@ -365,6 +588,7 @@ class BooksGroup extends StatelessWidget {
           book: book,
           viewInfo: elementInfo,
           setPageCallback: setPageCallback,
+          editCallback: editCallback,
         ),
       );
     }
@@ -408,11 +632,13 @@ class BookView extends StatelessWidget {
     required this.book,
     this.viewInfo = false,
     required this.setPageCallback,
+    required this.editCallback,
   });
 
   final bool viewInfo;
   final Book book;
   final void Function(Book) setPageCallback;
+  final void Function(Book) editCallback;
 
   void changeStatus() {
     // do smth
@@ -446,11 +672,14 @@ class BookView extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Padding(
-                padding: EdgeInsets.all(3),
-                child: Text(
-                  book.title,
-                  style: TextStyle(color: Colors.black, fontSize: 18),
+              GestureDetector(
+                onTap: () => editCallback(book),
+                child: Padding(
+                  padding: EdgeInsets.all(3),
+                  child: Text(
+                    book.title,
+                    style: TextStyle(color: Colors.black, fontSize: 18),
+                  ),
                 ),
               ),
               Text(
