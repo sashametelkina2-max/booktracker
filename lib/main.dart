@@ -1,6 +1,10 @@
+import 'dart:io';
 import 'dart:math';
-
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 enum BookState {
   New, // новая
@@ -15,6 +19,23 @@ int getValuePercentage(int value, int all) {
   return (min(value, all) / all * 100.0).round();
 }
 
+int now() {
+  return DateTime.now().millisecondsSinceEpoch;
+}
+
+bool isToday(int timestamp) {
+  // Преобразуем timestamp (в миллисекундах) в DateTime
+  final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
+
+  // Получаем текущую дату
+  final now = DateTime.now();
+
+  // Сравниваем только год, месяц и день
+  return date.year == now.year &&
+      date.month == now.month &&
+      date.day == now.day;
+}
+
 class Book {
   int id = 0;
   String title;
@@ -22,6 +43,7 @@ class Book {
   int pages;
   int currentPage;
   BookState state;
+  String? imagePath;
 
   int? rate;
   String notes = "";
@@ -30,14 +52,50 @@ class Book {
     required this.title,
     required this.author,
     required this.pages,
+    this.rate,
+    this.imagePath,
+    this.notes = "",
     this.currentPage = 0,
     this.state = BookState.New,
+    int? id,
   }) {
-    id = DateTime.now().millisecondsSinceEpoch;
+    this.id = id ?? now();
+  }
+
+  factory Book.fromJson(Map<String, dynamic> json) {
+    return Book(
+      id: json['id'] as int,
+      title: json['title'] as String,
+      author: json['author'] as String,
+      pages: json['pages'],
+      currentPage: json['currentPage'],
+      state: BookState.values.firstWhere((e) => e.toString() == json['state']),
+      rate: json['rate'],
+      notes: json['notes'],
+      imagePath: json['imagePath'],
+    );
+  }
+
+  File? getImage() {
+    return null;
   }
 
   int getPercentage() {
     return getValuePercentage(currentPage, pages);
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'author': author,
+      'pages': pages,
+      'currentPage': currentPage,
+      'state': state.toString(),
+      'rate': rate,
+      'notes': notes,
+      'imagePath': imagePath,
+    };
   }
 }
 
@@ -72,16 +130,76 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   Page page = Page.Home;
   int? currentBookIndex; // nullable, null safety
-  List<Book> books = [
-    Book(title: "asdf", author: "asdf", pages: 1234, currentPage: 500),
-    Book(title: "slsfdkjg", author: "s;dflkj", pages: 5),
-  ];
+  List<Book> books = [];
   int dayPagesGoal = 10;
-  int currentDayPages = 5;
+  int currentDayPages = 0;
+
+  _MyHomePageState() {
+    readData();
+  }
+
+  Future<void> saveData() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+
+    var books = this.books.map((item) => item.toJson()).toList();
+    String jsonList = jsonEncode(books);
+    await prefs.setString('books', jsonList);
+    await prefs.setInt('pagesGoal', dayPagesGoal);
+    await prefs.setInt('currentPages', currentDayPages);
+    await prefs.setInt('currentTimestamp', now());
+  }
+
+  Future<void> readData() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+
+    String booksString = prefs.getString('books') ?? "[]";
+    final List<dynamic> jsonList = jsonDecode(booksString);
+    setState(() {
+      books = jsonList.map((jsonItem) => Book.fromJson(jsonItem)).toList();
+
+      dayPagesGoal = prefs.getInt('pagesGoal') ?? 10;
+      int? currentTimestamp = prefs.getInt('currentTimestamp');
+      if (currentTimestamp != null) {
+        int currentPages = prefs.getInt('currentPages') ?? 0;
+        if (isToday(currentTimestamp)) {
+          currentDayPages = currentPages;
+        } else {
+          currentDayPages = 0;
+        }
+      }
+    });
+  }
+
+  Future<File?> pickImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      return File(pickedFile.path);
+    }
+    return null;
+  }
+
+  Future<File> saveImageLocally(File image) async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final fileName = image.path.split('/').last;
+    final savedImage = await image.copy('${appDir.path}/$fileName');
+    return savedImage;
+  }
+
+  Future<File?> loadSavedImage(String fileName) async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final file = File('${appDir.path}/$fileName');
+    if (await file.exists()) {
+      return file;
+    }
+    return null;
+  }
 
   void addBook(Book book, {bool redirect = true}) {
     setState(() {
       books.add(book);
+      saveData();
       if (redirect) {
         page = Page.Home;
       }
@@ -93,6 +211,7 @@ class _MyHomePageState extends State<MyHomePage> {
       int index = books.indexWhere((b) => b.id == book.id);
       if (index == -1) return;
       books[index] = book;
+      saveData();
       if (redirect) {
         page = Page.Home;
       }
@@ -104,6 +223,7 @@ class _MyHomePageState extends State<MyHomePage> {
       int index = books.indexWhere((b) => b.id == book.id);
       if (index == -1) return;
       books.removeAt(index);
+      saveData();
       page = Page.Home;
     });
   }
@@ -201,7 +321,7 @@ class _MyHomePageState extends State<MyHomePage> {
           BooksGroup(
             books: books.where((book) => book.state == BookState.New).toList(),
             title: "В процессе чтения",
-            elementInfo: true,
+            elementInfo: false,
             setPageCallback: (book) => setCurrentBookPage(book.id),
             editCallback: (book) => editBook(book.id),
           ),
@@ -211,7 +331,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     .where((book) => book.state == BookState.Abandoned)
                     .toList(),
             title: "Заброшенные",
-            elementInfo: true,
+            elementInfo: false,
             setPageCallback: (book) => setCurrentBookPage(book.id),
             editCallback: (book) => editBook(book.id),
           ),
@@ -419,6 +539,7 @@ class _MyHomePageState extends State<MyHomePage> {
     } else if (page == Page.BookEdit) {
       return bookEdit(books.firstWhere((book) => book.id == currentBookIndex));
     } else if (page == Page.CurrentPageEdit) {
+      print(currentBookIndex);
       return currentPageEdit(
         books.firstWhere((book) => book.id == currentBookIndex),
       );
@@ -481,6 +602,7 @@ class _InputRateState extends State<InputRate> {
 
   void update(int value) {
     setState(() {
+      widget.onChange(value);
       this.value = value;
     });
   }
@@ -646,15 +768,17 @@ class BookView extends StatelessWidget {
 
   Widget progress() {
     int percentage = book.getPercentage();
+    print(book.currentPage);
     return Row(
       mainAxisSize: MainAxisSize.max,
       children: [
-        SizedBox(
-          width: 300,
-          height: 10,
-          child: LinearProgressIndicator(value: percentage * 0.01),
+        Expanded(
+          child: SizedBox(
+            height: 10,
+            child: LinearProgressIndicator(value: percentage * 0.01),
+          ),
         ),
-        Text('$percentage%'),
+        Padding(padding: EdgeInsets.all(5), child: Text('$percentage%')),
       ],
     );
   }
@@ -665,36 +789,58 @@ class BookView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    var image = book.getImage();
     if (viewInfo) {
       return Card(
         child: Padding(
           padding: EdgeInsets.all(10),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              GestureDetector(
-                onTap: () => editCallback(book),
-                child: Padding(
-                  padding: EdgeInsets.all(3),
-                  child: Text(
-                    book.title,
-                    style: TextStyle(color: Colors.black, fontSize: 18),
-                  ),
-                ),
-              ),
-              Text(
-                book.author,
-                style: TextStyle(color: Colors.grey, fontSize: 13),
-              ),
               Row(
                 children: [
-                  Text("Текущая страница"),
-                  TextButton(
-                    onPressed: () => setPageCallback(book),
-                    child: Row(
+                  GestureDetector(
+                    onTap: () => editCallback(book),
+                    child:
+                        image != null
+                            ? Image.file(image)
+                            : Text('Изображение не выбрано'),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Icon(Icons.edit),
-                        Text(book.currentPage.toString()),
+                        GestureDetector(
+                          onTap: () => editCallback(book),
+                          child: Padding(
+                            padding: EdgeInsets.all(3),
+                            child: Text(
+                              book.title,
+                              style: TextStyle(
+                                color: Colors.black,
+                                fontSize: 18,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Text(
+                          book.author,
+                          style: TextStyle(color: Colors.grey, fontSize: 13),
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Text("Текущая страница"),
+                            TextButton(
+                              onPressed: () => setPageCallback(book),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.edit),
+                                  Text(book.currentPage.toString()),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -706,6 +852,31 @@ class BookView extends StatelessWidget {
         ),
       );
     }
-    return const Placeholder();
+    return GestureDetector(
+      onTap: () => editCallback(book),
+      child: SizedBox(
+        width: MediaQuery.of(context).size.width * 0.3,
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(10),
+            child: Column(
+              children: [
+                image != null
+                    ? Image.file(image)
+                    : Text('Изображение не выбрано'),
+                Padding(
+                  padding: EdgeInsets.all(3),
+                  child: Text(
+                    book.title,
+                    style: TextStyle(color: Colors.black, fontSize: 18),
+                  ),
+                ),
+                progress(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
