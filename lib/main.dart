@@ -6,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
+import 'package:toastification/toastification.dart';
+
 enum BookState {
   New, // новая
   Reading, // в процессе чтения
@@ -76,7 +78,12 @@ class Book {
     );
   }
 
-  File? getImage() {
+  Future<File?> getImage() async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final file = File('${appDir.path}/$imagePath');
+    if (await file.exists()) {
+      return file;
+    }
     return null;
   }
 
@@ -108,12 +115,14 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Book tracker',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+    return ToastificationWrapper(
+      child: MaterialApp(
+        title: 'Book tracker',
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        ),
+        home: const MyHomePage(title: 'Book tracker'),
       ),
-      home: const MyHomePage(title: 'Book tracker'),
     );
   }
 }
@@ -180,20 +189,12 @@ class _MyHomePageState extends State<MyHomePage> {
     return null;
   }
 
-  Future<File> saveImageLocally(File image) async {
+  Future<String> saveImageLocally(File image, String subpath) async {
     final appDir = await getApplicationDocumentsDirectory();
     final fileName = image.path.split('/').last;
-    final savedImage = await image.copy('${appDir.path}/$fileName');
-    return savedImage;
-  }
-
-  Future<File?> loadSavedImage(String fileName) async {
-    final appDir = await getApplicationDocumentsDirectory();
-    final file = File('${appDir.path}/$fileName');
-    if (await file.exists()) {
-      return file;
-    }
-    return null;
+    final path = '$fileName';
+    final savedImage = await image.copy('${appDir.path}/$path');
+    return path;
   }
 
   void addBook(Book book, {bool redirect = true}) {
@@ -260,8 +261,12 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  int getDayPercent() {
+    return getValuePercentage(currentDayPages, dayPagesGoal);
+  }
+
   Widget dayGoalButton() {
-    int percent = getValuePercentage(currentDayPages, dayPagesGoal);
+    int percent = getDayPercent();
     return ElevatedButton(
       onPressed: setDayGoal,
       style: ElevatedButton.styleFrom(
@@ -305,38 +310,90 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
+  void goRead(Book book) {
+    int index = books.indexWhere((book) => book.state == BookState.Reading);
+    if (index != -1) {
+      books[index].state = BookState.New;
+    }
+    book.state = BookState.Reading;
+    saveBook(book, redirect: false);
+  }
+
+  void banBook(Book book) {
+    book.state = BookState.Abandoned;
+    saveBook(book);
+  }
+
   Widget home() {
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          dayGoalButton(),
-          BooksGroup(
-            books:
-                books.where((book) => book.state == BookState.Reading).toList(),
-            title: "Читаю",
-            elementInfo: true,
-            setPageCallback: (book) => setCurrentBookPage(book.id),
-            editCallback: (book) => editBook(book.id),
-          ),
-          BooksGroup(
-            books: books.where((book) => book.state == BookState.New).toList(),
-            title: "В процессе чтения",
-            elementInfo: false,
-            setPageCallback: (book) => setCurrentBookPage(book.id),
-            editCallback: (book) => editBook(book.id),
-          ),
-          BooksGroup(
-            books:
-                books
-                    .where((book) => book.state == BookState.Abandoned)
-                    .toList(),
-            title: "Заброшенные",
-            elementInfo: false,
-            setPageCallback: (book) => setCurrentBookPage(book.id),
-            editCallback: (book) => editBook(book.id),
-          ),
-        ],
-      ),
+    return Column(
+      children: [
+        dayGoalButton(),
+        BooksGroup(
+          books:
+              books.where((book) => book.state == BookState.Reading).toList(),
+          title: "Читаю",
+          elementInfo: true,
+          setPageCallback: (book) => setCurrentBookPage(book.id),
+          editCallback: (book) => editBook(book.id),
+          goReadCallback: goRead,
+          banCallback: banBook,
+        ),
+        BooksGroup(
+          books: books.where((book) => book.state == BookState.New).toList(),
+          title: "В процессе чтения",
+          elementInfo: false,
+          setPageCallback: (book) => setCurrentBookPage(book.id),
+          editCallback: (book) => editBook(book.id),
+          goReadCallback: goRead,
+          banCallback: banBook,
+        ),
+        BooksGroup(
+          books:
+              books.where((book) => book.state == BookState.Abandoned).toList(),
+          title: "Заброшенные",
+          elementInfo: false,
+          setPageCallback: (book) => setCurrentBookPage(book.id),
+          editCallback: (book) => editBook(book.id),
+          goReadCallback: goRead,
+          banCallback: banBook,
+        ),
+      ],
+    );
+  }
+
+  Widget imageEdit(Book book) {
+    void pick() async {
+      var file = await pickImage();
+      if (file == null) return;
+      book.imagePath = await saveImageLocally(file, book.id.toString());
+    }
+
+    if (book.imagePath == null) {
+      return ElevatedButton(
+        onPressed: pick,
+        child: Column(
+          children: [Icon(Icons.image), Text("Выбрать изображение")],
+        ),
+      );
+    }
+    var image = book.getImage();
+    return Stack(
+      children: [
+        FutureBuilder(
+          future: image,
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return Icon(Icons.image);
+            }
+
+            return Image.file(snapshot.data!);
+          },
+        ),
+        Align(
+          alignment: Alignment.topRight,
+          child: IconButton(onPressed: pick, icon: Icon(Icons.edit)),
+        ),
+      ],
     );
   }
 
@@ -357,6 +414,7 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
           ],
         ),
+        imageEdit(book),
         inputField(
           defaultValue: book.title,
           label: "Название книги",
@@ -380,6 +438,7 @@ class _MyHomePageState extends State<MyHomePage> {
           label: "Заметки",
           placeholder: "Вы можете здесь написать впечатления от книги",
           onChange: (value) => book.notes = value,
+          maxLines: 5,
         ),
         SizedBox(height: 10),
         InputRate(
@@ -408,6 +467,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Widget currentPageEdit(Book book) {
     int previousPages = book.currentPage;
+    int lastPercent = getDayPercent();
 
     void update() {
       saveBook(book);
@@ -415,6 +475,14 @@ class _MyHomePageState extends State<MyHomePage> {
       setState(() {
         currentDayPages += delta;
       });
+      if (lastPercent < 100 && getDayPercent() >= 100) {
+        toastification.show(
+          context: context,
+          icon: Icon(Icons.check),
+          title: Text('Цель на день выполнена, вы молодец!'),
+          autoCloseDuration: const Duration(seconds: 5),
+        );
+      }
     }
 
     return Column(
@@ -575,7 +643,9 @@ class _MyHomePageState extends State<MyHomePage> {
         // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
       ),
-      body: Padding(padding: EdgeInsets.all(10), child: getCurrentPage()),
+      body: SingleChildScrollView(
+        child: Padding(padding: EdgeInsets.all(10), child: getCurrentPage()),
+      ),
       floatingActionButton: getActionButton(),
     );
   }
@@ -653,6 +723,7 @@ Widget inputField({
   required void Function(String) onChange,
   String? defaultValue,
   String placeholder = "",
+  int maxLines = 1,
 }) {
   return Padding(
     padding: EdgeInsets.symmetric(vertical: 10.0),
@@ -673,6 +744,7 @@ Widget inputField({
         TextFormField(
           onChanged: onChange,
           initialValue: defaultValue,
+          maxLines: maxLines,
           decoration: InputDecoration(
             hintText: placeholder,
             border: OutlineInputBorder(
@@ -692,6 +764,8 @@ class BooksGroup extends StatelessWidget {
     required this.title,
     required this.setPageCallback,
     required this.editCallback,
+    required this.goReadCallback,
+    required this.banCallback,
     this.elementInfo = false,
   });
 
@@ -700,6 +774,8 @@ class BooksGroup extends StatelessWidget {
   final List<Book> books;
   final void Function(Book) setPageCallback;
   final void Function(Book) editCallback;
+  final void Function(Book) goReadCallback;
+  final void Function(Book) banCallback;
 
   @override
   Widget build(BuildContext context) {
@@ -711,6 +787,8 @@ class BooksGroup extends StatelessWidget {
           viewInfo: elementInfo,
           setPageCallback: setPageCallback,
           editCallback: editCallback,
+          goReadCallback: goReadCallback,
+          banCallback: banCallback,
         ),
       );
     }
@@ -755,12 +833,16 @@ class BookView extends StatelessWidget {
     this.viewInfo = false,
     required this.setPageCallback,
     required this.editCallback,
+    required this.goReadCallback,
+    required this.banCallback,
   });
 
   final bool viewInfo;
   final Book book;
   final void Function(Book) setPageCallback;
   final void Function(Book) editCallback;
+  final void Function(Book) goReadCallback;
+  final void Function(Book) banCallback;
 
   void changeStatus() {
     // do smth
@@ -787,6 +869,21 @@ class BookView extends StatelessWidget {
     return ElevatedButton(onPressed: changeStatus, child: Text("Отложить"));
   }
 
+  Widget ImagePlaceholder() {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.red, width: 1.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Center(
+        child: Material(
+          color: Colors.transparent,
+          child: Icon(Icons.image, size: 40, color: Colors.grey),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     var image = book.getImage();
@@ -800,10 +897,26 @@ class BookView extends StatelessWidget {
                 children: [
                   GestureDetector(
                     onTap: () => editCallback(book),
-                    child:
-                        image != null
-                            ? Image.file(image)
-                            : Text('Изображение не выбрано'),
+                    child: FutureBuilder(
+                      future: image,
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) {
+                          return ImagePlaceholder();
+                        }
+
+                        return SizedBox(
+                          height: 150,
+                          child: AspectRatio(
+                            aspectRatio: 0.5,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(5),
+                              // по желанию
+                              child: Image.file(snapshot.data!),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                   Expanded(
                     child: Column(
@@ -826,20 +939,16 @@ class BookView extends StatelessWidget {
                           book.author,
                           style: TextStyle(color: Colors.grey, fontSize: 13),
                         ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Text("Текущая страница"),
-                            TextButton(
-                              onPressed: () => setPageCallback(book),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.edit),
-                                  Text(book.currentPage.toString()),
-                                ],
-                              ),
-                            ),
-                          ],
+                        TextButton(
+                          onPressed: () => setPageCallback(book),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Text("Текущая страница"),
+                              Icon(Icons.edit),
+                              Text(book.currentPage.toString()),
+                            ],
+                          ),
                         ),
                       ],
                     ),
@@ -847,13 +956,29 @@ class BookView extends StatelessWidget {
                 ],
               ),
               progress(),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blueGrey,
+                        // Set the background color here
+                        foregroundColor:
+                            Colors.white, // Set the text color here (optional)
+                      ),
+                      onPressed: () => banCallback(book),
+                      child: Text("Отложить"),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
       );
     }
     return GestureDetector(
-      onTap: () => editCallback(book),
+      onTap: () => goReadCallback(book),
       child: SizedBox(
         width: MediaQuery.of(context).size.width * 0.3,
         child: Card(
@@ -861,9 +986,16 @@ class BookView extends StatelessWidget {
             padding: EdgeInsets.all(10),
             child: Column(
               children: [
-                image != null
-                    ? Image.file(image)
-                    : Text('Изображение не выбрано'),
+                FutureBuilder(
+                  future: image,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return ImagePlaceholder();
+                    }
+
+                    return Image.file(snapshot.data!);
+                  },
+                ),
                 Padding(
                   padding: EdgeInsets.all(3),
                   child: Text(
