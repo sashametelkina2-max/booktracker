@@ -179,24 +179,6 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  Future<File?> pickImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-    if (pickedFile != null) {
-      return File(pickedFile.path);
-    }
-    return null;
-  }
-
-  Future<String> saveImageLocally(File image, String subpath) async {
-    final appDir = await getApplicationDocumentsDirectory();
-    final fileName = image.path.split('/').last;
-    final path = '$fileName';
-    final savedImage = await image.copy('${appDir.path}/$path');
-    return path;
-  }
-
   void addBook(Book book, {bool redirect = true}) {
     setState(() {
       books.add(book);
@@ -361,42 +343,6 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Widget imageEdit(Book book) {
-    void pick() async {
-      var file = await pickImage();
-      if (file == null) return;
-      book.imagePath = await saveImageLocally(file, book.id.toString());
-    }
-
-    if (book.imagePath == null) {
-      return ElevatedButton(
-        onPressed: pick,
-        child: Column(
-          children: [Icon(Icons.image), Text("Выбрать изображение")],
-        ),
-      );
-    }
-    var image = book.getImage();
-    return Stack(
-      children: [
-        FutureBuilder(
-          future: image,
-          builder: (context, snapshot) {
-            if (!snapshot.hasData) {
-              return Icon(Icons.image);
-            }
-
-            return Image.file(snapshot.data!);
-          },
-        ),
-        Align(
-          alignment: Alignment.topRight,
-          child: IconButton(onPressed: pick, icon: Icon(Icons.edit)),
-        ),
-      ],
-    );
-  }
-
   Widget bookEdit(Book book) {
     return Column(
       children: [
@@ -414,7 +360,13 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
           ],
         ),
-        imageEdit(book),
+        SizedBox(
+          height: MediaQuery.of(context).size.height * 0.3,
+          child: LogoPicker(
+            book: book,
+            pick: (String path) => book.imagePath = path,
+          ),
+        ),
         inputField(
           defaultValue: book.title,
           label: "Название книги",
@@ -465,110 +417,6 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Widget currentPageEdit(Book book) {
-    int previousPages = book.currentPage;
-    int lastPercent = getDayPercent();
-
-    void update() {
-      saveBook(book);
-      int delta = book.currentPage - previousPages;
-      setState(() {
-        currentDayPages += delta;
-      });
-      if (lastPercent < 100 && getDayPercent() >= 100) {
-        toastification.show(
-          context: context,
-          icon: Icon(Icons.check),
-          title: Text('Цель на день выполнена, вы молодец!'),
-          autoCloseDuration: const Duration(seconds: 5),
-        );
-      }
-    }
-
-    return Column(
-      children: [
-        TextButton(
-          onPressed: goHome,
-          child: Row(children: [Icon(Icons.arrow_back), Text("Назад")]),
-        ),
-        inputField(
-          label: "Количество прочитанных страниц",
-          defaultValue: book.currentPage.toString(),
-          onChange: (value) => book.currentPage = int.parse(value),
-        ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ElevatedButton(
-              onPressed: update,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blueAccent,
-                // Set the background color here
-                foregroundColor:
-                    Colors.white, // Set the text color here (optional)
-              ),
-              child: Text("Сохранить"),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget bookCreate() {
-    String title = "";
-    String author = "";
-    String pagesCount = "";
-
-    void create() {
-      Book book = Book(
-        title: title,
-        author: author,
-        pages: int.parse(pagesCount),
-      );
-      addBook(book);
-    }
-
-    return Column(
-      children: [
-        TextButton(
-          onPressed: goHome,
-          child: Row(children: [Icon(Icons.arrow_back), Text("Назад")]),
-        ),
-        inputField(
-          label: "Название книги",
-          placeholder: "Введите название книги",
-          onChange: (value) => title = value,
-        ),
-        inputField(
-          label: "Автор",
-          placeholder: "Введите автора",
-          onChange: (value) => author = value,
-        ),
-        inputField(
-          label: "Количество страниц",
-          placeholder: "Введите количество страниц",
-          onChange: (value) => pagesCount = value,
-        ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ElevatedButton(
-              onPressed: create,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blueAccent,
-                // Set the background color here
-                foregroundColor:
-                    Colors.white, // Set the text color here (optional)
-              ),
-              child: Text("Создать"),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
   Widget setupDayGoal() {
     return Column(
       children: [
@@ -607,12 +455,28 @@ class _MyHomePageState extends State<MyHomePage> {
     } else if (page == Page.BookEdit) {
       return bookEdit(books.firstWhere((book) => book.id == currentBookIndex));
     } else if (page == Page.CurrentPageEdit) {
-      print(currentBookIndex);
-      return currentPageEdit(
-        books.firstWhere((book) => book.id == currentBookIndex),
+      return CurrentPageSet(
+        book: books.firstWhere((book) => book.id == currentBookIndex),
+        goHome: goHome,
+        update: (int page) {
+          int lastPercent = getDayPercent();
+          var book = books.firstWhere((book) => book.id == currentBookIndex);
+          int delta = page - book.currentPage;
+          currentDayPages += delta;
+          book.currentPage = page;
+          saveBook(book);
+          if (lastPercent < 100 && getDayPercent() >= 100) {
+            toastification.show(
+              context: context,
+              icon: Icon(Icons.check),
+              title: Text('Цель на день выполнена, вы молодец!'),
+              autoCloseDuration: const Duration(seconds: 5),
+            );
+          }
+        },
       );
     } else if (page == Page.BookCreate) {
-      return bookCreate();
+      return BookCreatePage(goHome: goHome, addBook: addBook);
     } else if (page == Page.SetupDayGoal) {
       return setupDayGoal();
     }
@@ -647,6 +511,199 @@ class _MyHomePageState extends State<MyHomePage> {
         child: Padding(padding: EdgeInsets.all(10), child: getCurrentPage()),
       ),
       floatingActionButton: getActionButton(),
+    );
+  }
+}
+
+class CurrentPageSet extends StatelessWidget {
+  CurrentPageSet({
+    super.key,
+    required this.book,
+    required this.goHome,
+    required this.update,
+  });
+
+  final void Function() goHome;
+  final void Function(int page) update;
+  final Book book;
+
+  late int page = book.currentPage;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        TextButton(
+          onPressed: goHome,
+          child: Row(children: [Icon(Icons.arrow_back), Text("Назад")]),
+        ),
+        inputField(
+          label: "Количество прочитанных страниц",
+          defaultValue: page.toString(),
+          onChange: (value) {
+            page = int.parse(value);
+          },
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () => update(page),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                // Set the background color here
+                foregroundColor:
+                    Colors.white, // Set the text color here (optional)
+              ),
+              child: Text("Сохранить"),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class BookCreatePage extends StatelessWidget {
+  BookCreatePage({super.key, required this.addBook, required this.goHome});
+
+  final void Function(Book book) addBook;
+  final void Function() goHome;
+
+  final Book book = Book(title: "", author: "", pages: 0);
+
+  @override
+  Widget build(BuildContext context) {
+    void create() {
+      addBook(book);
+    }
+
+    return Column(
+      children: [
+        TextButton(
+          onPressed: goHome,
+          child: Row(children: [Icon(Icons.arrow_back), Text("Назад")]),
+        ),
+        SizedBox(
+          height: MediaQuery.of(context).size.height * 0.3,
+          child: LogoPicker(
+            book: book,
+            pick: (String path) => book.imagePath = path,
+          ),
+        ),
+        inputField(
+          label: "Название книги",
+          placeholder: "Введите название книги",
+          onChange: (value) => book.title = value,
+        ),
+        inputField(
+          label: "Автор",
+          placeholder: "Введите автора",
+          onChange: (value) => book.author = value,
+        ),
+        inputField(
+          label: "Количество страниц",
+          placeholder: "Введите количество страниц",
+          onChange: (value) => book.pages = int.parse(value),
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: create,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                // Set the background color here
+                foregroundColor:
+                    Colors.white, // Set the text color here (optional)
+              ),
+              child: Text("Создать"),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class LogoPicker extends StatefulWidget {
+  const LogoPicker({super.key, required this.book, required this.pick});
+
+  final Book book;
+  final void Function(String) pick;
+
+  @override
+  State<LogoPicker> createState() => _LogoPickerState();
+}
+
+class _LogoPickerState extends State<LogoPicker> {
+  Future<File?> pickImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      return File(pickedFile.path);
+    }
+    return null;
+  }
+
+  Future<String> saveImageLocally(File image, String subpath) async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final fileName = image.path.split('/').last;
+    final path = '$fileName';
+    final savedImage = await image.copy('${appDir.path}/$path');
+    return path;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    void pick() async {
+      var file = await pickImage();
+      if (file == null) return;
+      var path = await saveImageLocally(file, widget.book.id.toString());
+      setState(() {
+        widget.book.imagePath = path;
+      });
+    }
+
+    var image = widget.book.getImage();
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Stack(
+          alignment: Alignment.center,
+          children: [
+            imageViewer(image),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child:
+                  widget.book.imagePath == null
+                      ? ElevatedButton(
+                        onPressed: pick,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.image),
+                            Text("Выбрать изображение"),
+                          ],
+                        ),
+                      )
+                      : IconButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          // Set the background color here
+                          foregroundColor:
+                              Colors
+                                  .black, // Set the text color here (optional)
+                        ),
+                        onPressed: pick,
+                        icon: Icon(Icons.edit),
+                      ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -734,11 +791,7 @@ Widget inputField({
           padding: EdgeInsets.fromLTRB(0, 0, 0, 5),
           child: Text(
             label,
-            style: TextStyle(
-              color: Colors.black,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
+            style: TextStyle(color: Colors.black, fontSize: 16),
           ),
         ),
         TextFormField(
@@ -826,6 +879,51 @@ class BooksGroup extends StatelessWidget {
   }
 }
 
+Widget ImagePlaceholder() {
+  return AspectRatio(
+    aspectRatio: 0.8,
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(5),
+      // по желанию
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: Color.fromRGBO(100, 100, 100, 1),
+            width: 1.5,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: Material(
+            color: Colors.transparent,
+            child: Icon(Icons.image, size: 40, color: Colors.grey),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+Widget imageViewer(Future<File?> image) {
+  return FutureBuilder(
+    future: image,
+    builder: (context, snapshot) {
+      if (!snapshot.hasData) {
+        return ImagePlaceholder();
+      }
+
+      return AspectRatio(
+        aspectRatio: 0.8,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          // по желанию
+          child: Image.file(snapshot.data!, fit: BoxFit.cover),
+        ),
+      );
+    },
+  );
+}
+
 class BookView extends StatelessWidget {
   const BookView({
     super.key,
@@ -850,7 +948,6 @@ class BookView extends StatelessWidget {
 
   Widget progress() {
     int percentage = book.getPercentage();
-    print(book.currentPage);
     return Row(
       mainAxisSize: MainAxisSize.max,
       children: [
@@ -869,21 +966,6 @@ class BookView extends StatelessWidget {
     return ElevatedButton(onPressed: changeStatus, child: Text("Отложить"));
   }
 
-  Widget ImagePlaceholder() {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.red, width: 1.5),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Center(
-        child: Material(
-          color: Colors.transparent,
-          child: Icon(Icons.image, size: 40, color: Colors.grey),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     var image = book.getImage();
@@ -897,26 +979,7 @@ class BookView extends StatelessWidget {
                 children: [
                   GestureDetector(
                     onTap: () => editCallback(book),
-                    child: FutureBuilder(
-                      future: image,
-                      builder: (context, snapshot) {
-                        if (!snapshot.hasData) {
-                          return ImagePlaceholder();
-                        }
-
-                        return SizedBox(
-                          height: 150,
-                          child: AspectRatio(
-                            aspectRatio: 0.5,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(5),
-                              // по желанию
-                              child: Image.file(snapshot.data!),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                    child: SizedBox(height: 150, child: imageViewer(image)),
                   ),
                   Expanded(
                     child: Column(
@@ -959,12 +1022,12 @@ class BookView extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: ElevatedButton(
+                    child: OutlinedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueGrey,
+                        //   backgroundColor: Colors.blueAccent,
                         // Set the background color here
                         foregroundColor:
-                            Colors.white, // Set the text color here (optional)
+                            Colors.black, // Set the text color here (optional)
                       ),
                       onPressed: () => banCallback(book),
                       child: Text("Отложить"),
@@ -986,16 +1049,7 @@ class BookView extends StatelessWidget {
             padding: EdgeInsets.all(10),
             child: Column(
               children: [
-                FutureBuilder(
-                  future: image,
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
-                      return ImagePlaceholder();
-                    }
-
-                    return Image.file(snapshot.data!);
-                  },
-                ),
+                imageViewer(image),
                 Padding(
                   padding: EdgeInsets.all(3),
                   child: Text(
