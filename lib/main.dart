@@ -138,10 +138,13 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   Page page = Page.Home;
-  int? currentBookIndex; // nullable, null safety
+  Book? currentBook;
   List<Book> books = [];
   int dayPagesGoal = 10;
   int currentDayPages = 0;
+  String? searchCriteria;
+
+  final TextEditingController _controller = TextEditingController();
 
   _MyHomePageState() {
     readData();
@@ -176,6 +179,12 @@ class _MyHomePageState extends State<MyHomePage> {
           currentDayPages = 0;
         }
       }
+    });
+  }
+
+  void addSearchCriteria(String? criteria) {
+    setState(() {
+      searchCriteria = criteria;
     });
   }
 
@@ -220,20 +229,21 @@ class _MyHomePageState extends State<MyHomePage> {
   void createBook() {
     setState(() {
       page = Page.BookCreate;
+      currentBook = Book(title: "", author: "", pages: 0);
     });
   }
 
-  void editBook(int bookId) {
+  void editBook(Book book) {
     setState(() {
       page = Page.BookEdit;
-      currentBookIndex = bookId;
+      currentBook = book;
     });
   }
 
-  void setCurrentBookPage(int bookId) {
+  void setCurrentBookPage(Book book) {
     setState(() {
       page = Page.CurrentPageEdit;
-      currentBookIndex = bookId;
+      currentBook = book;
     });
   }
 
@@ -307,35 +317,80 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Widget home() {
+    var titleBooks = books.where(
+      (book) => searchCriteria == null || book.title.toLowerCase().contains(searchCriteria!.toLowerCase()),
+    );
+    var readingBooks =
+        titleBooks
+            .where(
+              (book) =>
+                  book.state == BookState.New ||
+                  book.state == BookState.Reading,
+            )
+            .toList();
+    readingBooks.sort(
+      (book1, book2) => book1.state == BookState.Reading ? -1 : 1,
+    );
     return Column(
       children: [
         dayGoalButton(),
+        Stack(
+          alignment: Alignment.centerRight,
+          children: [
+            inputField(
+              controller: _controller,
+              onChange: addSearchCriteria,
+              placeholder: "Поиск книги",
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    onPressed: () {
+                      addSearchCriteria(null);
+                      _controller.clear();
+                      },
+                    icon: Icon(
+                      searchCriteria == null ? Icons.search : Icons.close,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
         BooksGroup(
           books:
-              books.where((book) => book.state == BookState.Reading).toList(),
+              titleBooks
+                  .where((book) => book.state == BookState.Reading)
+                  .toList(),
           title: "Читаю",
           elementInfo: true,
-          setPageCallback: (book) => setCurrentBookPage(book.id),
-          editCallback: (book) => editBook(book.id),
+          setPageCallback: (book) => setCurrentBookPage(book),
+          editCallback: (book) => editBook(book),
           goReadCallback: goRead,
           banCallback: banBook,
         ),
         BooksGroup(
-          books: books.where((book) => book.state == BookState.New).toList(),
+          books: readingBooks,
           title: "В процессе чтения",
           elementInfo: false,
-          setPageCallback: (book) => setCurrentBookPage(book.id),
-          editCallback: (book) => editBook(book.id),
+          setPageCallback: (book) => setCurrentBookPage(book),
+          editCallback: (book) => editBook(book),
           goReadCallback: goRead,
           banCallback: banBook,
         ),
         BooksGroup(
           books:
-              books.where((book) => book.state == BookState.Abandoned).toList(),
+              titleBooks
+                  .where((book) => book.state == BookState.Abandoned)
+                  .toList(),
           title: "Заброшенные",
           elementInfo: false,
-          setPageCallback: (book) => setCurrentBookPage(book.id),
-          editCallback: (book) => editBook(book.id),
+          setPageCallback: (book) => setCurrentBookPage(book),
+          editCallback: (book) => editBook(book),
           goReadCallback: goRead,
           banCallback: banBook,
         ),
@@ -453,14 +508,14 @@ class _MyHomePageState extends State<MyHomePage> {
     if (page == Page.Home) {
       return home();
     } else if (page == Page.BookEdit) {
-      return bookEdit(books.firstWhere((book) => book.id == currentBookIndex));
+      return bookEdit(currentBook!);
     } else if (page == Page.CurrentPageEdit) {
       return CurrentPageSet(
-        book: books.firstWhere((book) => book.id == currentBookIndex),
+        book: currentBook!,
         goHome: goHome,
         update: (int page) {
           int lastPercent = getDayPercent();
-          var book = books.firstWhere((book) => book.id == currentBookIndex);
+          var book = currentBook!;
           int delta = page - book.currentPage;
           currentDayPages += delta;
           book.currentPage = page;
@@ -476,7 +531,11 @@ class _MyHomePageState extends State<MyHomePage> {
         },
       );
     } else if (page == Page.BookCreate) {
-      return BookCreatePage(goHome: goHome, addBook: addBook);
+      return BookCreatePage(
+        book: currentBook!,
+        goHome: goHome,
+        addBook: addBook,
+      );
     } else if (page == Page.SetupDayGoal) {
       return setupDayGoal();
     }
@@ -565,17 +624,45 @@ class CurrentPageSet extends StatelessWidget {
 }
 
 class BookCreatePage extends StatelessWidget {
-  BookCreatePage({super.key, required this.addBook, required this.goHome});
+  const BookCreatePage({
+    super.key,
+    required this.book,
+    required this.addBook,
+    required this.goHome,
+  });
 
   final void Function(Book book) addBook;
   final void Function() goHome;
 
-  final Book book = Book(title: "", author: "", pages: 0);
+  final Book book;
+
+  bool validate(context) {
+    String? error;
+
+    if (book.title.isEmpty) {
+      error = "Введите заголовок";
+    } else if (book.pages == 0) {
+      error = "Введите количество страниц";
+    }
+
+    if (error != null) {
+      toastification.show(
+        context: context,
+        icon: Icon(Icons.close, color: Colors.red),
+        title: Text("Ошибка валидации:\n$error"),
+        autoCloseDuration: const Duration(seconds: 5),
+      );
+    }
+
+    return error == null;
+  }
 
   @override
   Widget build(BuildContext context) {
     void create() {
-      addBook(book);
+      if (validate(context)) {
+        addBook(book);
+      }
     }
 
     return Column(
@@ -583,6 +670,13 @@ class BookCreatePage extends StatelessWidget {
         TextButton(
           onPressed: goHome,
           child: Row(children: [Icon(Icons.arrow_back), Text("Назад")]),
+        ),
+        Padding(
+          padding: EdgeInsets.only(bottom: 10),
+          child: Text(
+            "СОЗДАНИЕ КНИГИ",
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
         ),
         SizedBox(
           height: MediaQuery.of(context).size.height * 0.3,
@@ -604,7 +698,14 @@ class BookCreatePage extends StatelessWidget {
         inputField(
           label: "Количество страниц",
           placeholder: "Введите количество страниц",
-          onChange: (value) => book.pages = int.parse(value),
+          onChange: (value) {
+            int? val = int.tryParse(value);
+            if (val == null) {
+              book.pages = 0;
+            } else {
+              book.pages = val;
+            }
+          },
         ),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -650,7 +751,7 @@ class _LogoPickerState extends State<LogoPicker> {
   Future<String> saveImageLocally(File image, String subpath) async {
     final appDir = await getApplicationDocumentsDirectory();
     final fileName = image.path.split('/').last;
-    final path = '$fileName';
+    final path = fileName;
     final savedImage = await image.copy('${appDir.path}/$path');
     return path;
   }
@@ -776,8 +877,9 @@ class _InputRateState extends State<InputRate> {
 }
 
 Widget inputField({
-  required String label,
+  String? label,
   required void Function(String) onChange,
+  TextEditingController? controller,
   String? defaultValue,
   String placeholder = "",
   int maxLines = 1,
@@ -787,14 +889,17 @@ Widget inputField({
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: EdgeInsets.fromLTRB(0, 0, 0, 5),
-          child: Text(
-            label,
-            style: TextStyle(color: Colors.black, fontSize: 16),
-          ),
-        ),
+        (label == null
+            ? Container()
+            : Padding(
+              padding: EdgeInsets.fromLTRB(0, 0, 0, 5),
+              child: Text(
+                label,
+                style: TextStyle(color: Colors.black, fontSize: 16),
+              ),
+            )),
         TextFormField(
+          controller: controller,
           onChanged: onChange,
           initialValue: defaultValue,
           maxLines: maxLines,
@@ -854,6 +959,13 @@ class BooksGroup extends StatelessWidget {
       );
     }
 
+    String getTitle() {
+      if (books.isEmpty) {
+        return title;
+      }
+      return "$title (${books.length})";
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -861,9 +973,9 @@ class BooksGroup extends StatelessWidget {
           children: [
             Expanded(
               child: Padding(
-                padding: EdgeInsets.all(10),
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 20),
                 child: Text(
-                  title,
+                  getTitle(),
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: Colors.grey,
@@ -873,7 +985,13 @@ class BooksGroup extends StatelessWidget {
             ),
           ],
         ),
-        Wrap(children: bookList),
+        (bookList.length > 1
+            ? SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: bookList),
+            )
+            : bookList[0]),
+        //Wrap(children: bookList, spacing: 5),
       ],
     );
   }
@@ -983,14 +1101,16 @@ class BookView extends StatelessWidget {
                   ),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         GestureDetector(
                           onTap: () => editCallback(book),
                           child: Padding(
-                            padding: EdgeInsets.all(3),
+                            padding: EdgeInsets.symmetric(horizontal: 10),
                             child: Text(
                               book.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: Colors.black,
                                 fontSize: 18,
@@ -998,14 +1118,17 @@ class BookView extends StatelessWidget {
                             ),
                           ),
                         ),
-                        Text(
-                          book.author,
-                          style: TextStyle(color: Colors.grey, fontSize: 13),
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 10),
+                          child: Text(
+                            book.author,
+                            style: TextStyle(color: Colors.grey, fontSize: 13),
+                          ),
                         ),
                         TextButton(
                           onPressed: () => setPageCallback(book),
                           child: Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
+                            mainAxisAlignment: MainAxisAlignment.start,
                             children: [
                               Text("Текущая страница"),
                               Icon(Icons.edit),
@@ -1043,18 +1166,26 @@ class BookView extends StatelessWidget {
     return GestureDetector(
       onTap: () => goReadCallback(book),
       child: SizedBox(
-        width: MediaQuery.of(context).size.width * 0.3,
+        width:
+            MediaQuery.of(context).size.width *
+            (book.state == BookState.Reading ? 0.34 : 0.3),
         child: Card(
           child: Padding(
             padding: EdgeInsets.all(10),
             child: Column(
               children: [
                 imageViewer(image),
-                Padding(
-                  padding: EdgeInsets.all(3),
-                  child: Text(
-                    book.title,
-                    style: TextStyle(color: Colors.black, fontSize: 18),
+                SizedBox(
+                  height: 55,
+                  child: Padding(
+                    padding: EdgeInsets.all(3),
+                    child: Text(
+                      book.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      // Use an ellipsis for overflow
+                      style: TextStyle(color: Colors.black, fontSize: 18),
+                    ),
                   ),
                 ),
                 progress(),
